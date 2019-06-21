@@ -1,0 +1,128 @@
+早期版本:见压缩文件
+后期版本:
+s1, s2, s3, s4, s5 = self.inference(batch_x)
+
+        f5 = up_sample_layer(s5, s5.get_shape().as_list(), 2)
+        f5g = conv(f5, ksize=3, stride=1, filters_out=32)
+        global_feature = ul.spp_layer(f5g, levels=3)
+
+        with tf.variable_scope('fuse5-4'):
+            f4 = tf.concat([f5, s4], axis=3, name='concat5-4')
+            ################################################################################################################
+            ################################################################################################################
+            f4 = conv(f4, ksize=3, stride=1, filters_out=512)
+
+        f4 = up_sample_layer(f4, f4.get_shape().as_list(), 2)
+        with tf.variable_scope('fuse4-3'):
+            f3 = tf.concat([f4, s3], axis=3, name='concat4-3')
+            ################################################################################################################
+            ################################################################################################################
+            f3 = conv(f3, ksize=3, stride=1, filters_out=256)
+
+        f3 = up_sample_layer(f3, f3.get_shape().as_list(), 2)
+        with tf.variable_scope('fuse3-2'):
+            f2 = tf.concat([f3, s2], axis=3, name='concat3-2')
+            ################################################################################################################
+            ################################################################################################################
+            f2 = conv(f2, ksize=3, stride=1, filters_out=128)
+
+        f2 = up_sample_layer(f2, f2.get_shape().as_list(), 2)
+        with tf.variable_scope('fuse2-1'):
+            f1 = tf.concat([f2, s1], axis=3, name='concat2-1')
+            ################################################################################################################
+            ################################################################################################################
+            f1 = conv(f1, ksize=3, stride=1, filters_out=64)
+        fg = up_sample_layer(f1, f1.get_shape().as_list(), 2)
+
+        g1 = self.graph(segments, fg, n_edge, receivers, senders, edge, n_node,global_feature)
+
+        graph_work1 = gn.modules.GraphNetwork(
+            edge_model_fn=lambda: snt.nets.MLP([64], initializers={
+                "w": tf.truncated_normal_initializer(stddev=CONV_WEIGHT_STDDEV_fc)}),
+            node_model_fn=lambda: snt.nets.MLP([64], initializers={
+                "w": tf.truncated_normal_initializer(stddev=CONV_WEIGHT_STDDEV_fc)}),
+            global_model_fn=lambda: snt.nets.MLP([128], initializers={
+                "w": tf.truncated_normal_initializer(stddev=CONV_WEIGHT_STDDEV_fc)}))
+
+        graph_work2 = gn.modules.GraphNetwork(
+            edge_model_fn=lambda: snt.nets.MLP([64], initializers={
+                "w": tf.truncated_normal_initializer(stddev=CONV_WEIGHT_STDDEV_fc)}),
+            node_model_fn=lambda: snt.nets.MLP([64], initializers={
+                "w": tf.truncated_normal_initializer(stddev=CONV_WEIGHT_STDDEV_fc)}),
+            global_model_fn=lambda: snt.nets.MLP([128], initializers={
+                "w": tf.truncated_normal_initializer(stddev=CONV_WEIGHT_STDDEV_fc)}))
+
+        graph_work3 = gn.modules.GraphNetwork(
+            edge_model_fn=lambda: snt.nets.MLP([32], initializers={
+                "w": tf.truncated_normal_initializer(stddev=CONV_WEIGHT_STDDEV_fc)}),
+            node_model_fn=lambda: snt.nets.MLP([32], initializers={
+                "w": tf.truncated_normal_initializer(stddev=CONV_WEIGHT_STDDEV_fc)}),
+            global_model_fn=lambda: snt.nets.MLP([64], initializers={
+                "w": tf.truncated_normal_initializer(stddev=CONV_WEIGHT_STDDEV_fc)}))
+
+        graph_work4 = gn.modules.GraphNetwork(
+            edge_model_fn=lambda: snt.nets.MLP([32], initializers={
+                "w": tf.truncated_normal_initializer(stddev=CONV_WEIGHT_STDDEV_fc)}),
+            node_model_fn=lambda: snt.nets.MLP([32], initializers={
+                "w": tf.truncated_normal_initializer(stddev=CONV_WEIGHT_STDDEV_fc)}),
+            global_model_fn=lambda: snt.nets.MLP([64], initializers={
+                "w": tf.truncated_normal_initializer(stddev=CONV_WEIGHT_STDDEV_fc)}))
+
+        graph_work5 = gn.modules.GraphNetwork(
+            edge_model_fn=lambda: snt.nets.MLP([32], initializers={
+                "w": tf.truncated_normal_initializer(stddev=CONV_WEIGHT_STDDEV_fc)}),
+            node_model_fn=lambda: snt.nets.MLP([2], initializers={
+                "w": tf.truncated_normal_initializer(stddev=CONV_WEIGHT_STDDEV_fc)}),
+            global_model_fn=lambda: snt.nets.MLP([2], initializers={
+                "w": tf.truncated_normal_initializer(stddev=CONV_WEIGHT_STDDEV_fc)}))
+
+        g2 = graph_work1(g1)
+        g3 = graph_work2(g2)
+        g4 = graph_work3(g3)
+        g5 = graph_work4(g4)
+        g6 = graph_work5(g5)
+
+        #        return g1,g6
+        node_label = tf.cast(tf.unsorted_segment_mean(label, segments, g6.n_node[0]),
+                             dtype=tf.float32)
+        label_mean = tf.reduce_mean(tf.cast(label,dtype = tf.float32))
+
+        a = tf.ones_like(node_label,dtype=tf.int32)
+        b = tf.zeros_like(node_label,dtype=tf.int32)
+        condition = tf.less(node_label, label_mean)
+        label_t = tf.where(condition,b,a)
+        label_t = tf.squeeze(label_t,axis=1)
+        label_t_onehot = tf.one_hot(label_t,2,axis = 1)
+        cross_entropy = tf.nn.softmax_cross_entropy_with_logits_v2(logits=g6.nodes, labels=label_t_onehot)
+        cross_entropy_mean = tf.reduce_mean(cross_entropy)
+        score = tf.nn.softmax(g6.nodes)
+        #L2范数
+
+        # score = tf.sigmoid(g6.nodes)
+        # MSE = tf.reduce_mean(tf.square(score - node_label))
+
+
+
+
+
+        ################################################################################################################
+        ################################################################################################################
+        self.loss = cross_entropy_mean
+        reg_loss_list = tf.losses.get_regularization_losses()
+        reg_loss = 0.0
+        if len(reg_loss_list) != 0:
+            reg_loss = tf.add_n(reg_loss_list)
+            self.loss += reg_loss
+        # regularization_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
+        # self.loss = tf.add_n([cross_entropy_mean] + [cross_entropy_mean_net2] + [cross_entropy_mean_net3] + regularization_losses)
+        # tf.summary.scalar("CE-net1", cross_entropy_mean)
+        # tf.summary.scalar("CE-net2", cross_entropy_mean_net2)
+        # tf.summary.scalar("CE-net3", cross_entropy_mean_net3)
+        # tf.summary.scalar("fisher-net1", fisherloss_net1)
+        # tf.summary.scalar("fisher-net2", fisherloss_net2)
+        # tf.summary.scalar("fisher-net3", fisherloss_net3)
+        # tf.summary.scalar("reg-loss", reg_loss)
+        # summary_op = tf.summary.merge_all()
+        lap_loss = tf.zeros(0)
+
+        return self.loss, cross_entropy_mean, score, label_t_onehot
